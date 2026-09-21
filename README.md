@@ -32,11 +32,10 @@ flowchart LR
 automated-deliverable-control/
 ├── README.md
 ├── setup.sh
-├── cloud-function/
-│   ├── main.py
-│   ├── requirements.txt
-│   └── test_main.py
-└── capturas/
+└── cloud-function/
+   ├── main.py
+   ├── requirements.txt
+   └── test_main.py
 ```
 ## paso a paso
 
