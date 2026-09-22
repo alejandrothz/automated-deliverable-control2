@@ -111,4 +111,29 @@ se revisan 8 pruebas: 5 revisan las reglas de validación (incluido el caso lím
 |Borrar|Denegado|Denegado|
 |Sobrescribir|Denegado|Denegado|
 
+## DIA 2 - AUTOMATIZACIÓN EN GOOGLE WORKSPACE
 
+El registro y las notificaciones se automatizan con google apps scritp.
+
+## Flujo
+
+Peticion POST → doPost valida y escribe la fila en el Sheet
+→ si el estado es ERROR, manda un correo inmediato
+→ envia un resumen diario al fianl del dia + un evento en google calendar
+→ cuando la revisora cambia el estado, se escribe la fecha de cierre y se avisa
+
+## componentes
+
+| Función | Qué hace | Disparador |
+|---|---|---|
+| doPost | Recibe los metadatos y escribe la fila | Petición a la URL de la web app |
+| resumenDiario | Cuenta el día, manda el resumen y agenda la revisión | activador por horario |
+| alEditar | Escribe la fecha de cierre y avisa del resultado | Activador instalable Al editar |
+
+## decisiones tecnicas
+
+- **La columna Generation es texto**: con 16 dígitos, Sheets alteraría el último si fuera número.
+- **El estado se elige de un desplegable**: el código compara textos exactos.
+- **notificaciones**: inmediata solo para errores, y el resto en el resumen diario.
+- **Un solo evento de Calendar al día**: uno por archivo saturaría el calendario.
+- **Permisos por grupo**: el Sheet se comparte con adc-revisores, no con personas.
