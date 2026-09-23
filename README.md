@@ -137,3 +137,56 @@ Peticion POST → doPost valida y escribe la fila en el Sheet
 - **notificaciones**: inmediata solo para errores, y el resto en el resumen diario.
 - **Un solo evento de Calendar al día**: uno por archivo saturaría el calendario.
 - **Permisos por grupo**: el Sheet se comparte con adc-revisores, no con personas.
+
+## Día 3 - Integración y seguridad
+
+La cloud function del Dia 1 se conecto con el apps script del dia 2, mediante un webhook firmado. en donde nos queda un flujo asi:
+
+```mermaid
+flowchart LR
+    U[Usuario ] -->|sube archivo| B[(Bucket)]
+    B --> F[Cloud Function Valida y firma]
+    F --> A[Apps Script verifica la firma]
+    A --> S[Escribe la fila en el Sheet]
+    S --> Z[Notificacioens y cierre del ciclo]
+```
+## Medidas de seguridad 
+
+| Medida | Contra qué protege |
+|---|---|
+| Firma HMAC-SHA256 | Que un tercero escriba filas falsas en el Sheet |
+| Ventana de 5 minutos | Que se reenvíe una petición válida capturada antes |
+| LockService | IDs duplicados ante peticiones simultáneas |
+| Deduplicación por generation | Filas repetidas cuando Google reintenta un evento |
+| Secreto fuera del código | El secreto no está en el repositorio: va en propiedades del script y en variables de entorno |
+| Mínimo privilegio | Cada identidad tiene solo los permisos que necesita |
+
+## Decisiones técnicas
+
+- **se firma una cadena fia (`ts.generation.archivo`) y no todo el archivo completo.** ya que java y python hacen el json con diferencias minimas
+- **El envío al Sheet tiene su propio manejo de errores.** si falla, el archivo ya quedó registrado en cloud logging.
+- **Timeot de 30 segundos** en el envío, para que la funcion no se quede esperando.
+
+## prueba de carga
+
+10 archivos: 6 válidos, 2 con nombre inválido y 2 con tipo no permitido.
+Sin IDs duplicados ni filas repetidas. Costo total de los tres días: MXN 0.00.
+
+## mejoras futuras
+
+- secret manager en lugar de variables de entorno, para rotar el secret
+- Validar el contenido del archivo, no solo el tipo declarado.
+- Cortar el gasto automaticamente al alcanzar el presupuesto, no solo avisar.
+- Provisionar un dominio de worspace para aplicar de verdad las politicas de seguridad
+
+## diagrama final
+
+```mermaid
+flowchart LR
+    U[Usuario] -->|sube archivo| B[(Bucket)]
+    B --> P[Pub/Sub] --> E[Eventarc]
+    E --> F[Cloud Function]
+    F -->|POST firmado| W[Apps Script]
+    W -->|verifica firma| S[(Google Sheet)]
+    S --> G[Gmail / Calendar]
+```
