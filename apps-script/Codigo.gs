@@ -2,6 +2,22 @@
 const CORREO = "adc-revisores@googlegroups.com";
 
 /**
+ * Nuevas filas agregadas dia 3
+ * se agrega la seguridad
+ * 
+ * Cambio respecto al Dia 2: la URL sigue siendo publica, pero ahora
+ * solo se acepta una peticion que venga con el secreto
+ * compartido. Quien no conozca el secreto, no puede escribir.
+ */
+
+// el secreto se lle de las propiedades del script.
+const SECRET = PropertiesService.getScriptProperties().getProperty("SECRET");
+
+// cuantos segundos se acepta una peticion desde que se firmo
+const VENTANA_SEGUNDOS = 300; //5 min
+
+
+/**
  * doPost una funcion con nombre reservado. Cuando se publica el script
  * cuando alguien envia datos (POST) a la URL de la web app google busca dentro del
  * script una funcion llamada dopost y la ejecuta.
@@ -16,45 +32,100 @@ function doPost(e) {
   //pasa al catch para decidir que hacer
   try {
     // el texto llega como JSON y JSON.parse lo convierte a objeto
-    const d= JSON.parse(e.postData.contents)
+    const d = JSON.parse(e.postData.contents);
 
-    // valida: sin nombre de archivo no hay nada que registrar
-    if(!d.archivo) {
-      return texto("falta el cambo archivo");
+    // proteccion 1: firma
+    // se arma la misma cadena que armo quien envio, pegando tres datos con puntos
+    const cadena = d.ts + "." + d.generation + "." + d.archivo;
+
+    if (firmar(cadena) !== d.sig) {   //compara el sello actual con el que llego
+      console.warn("Firma invalida para: " + d.archivo);
+      return texto("firma invalida");
     }
 
-    const hoja = SpreadsheetApp.getActive().getSheetByName("REGISTRO");
+    // proteccion 2: el tiempo
+    // evita que copien una peticion valida y la reenvien despues
+    const ahora = Date.now() / 1000;
+    const segundosTranscurridos = Math.abs(ahora - Number(d.ts));
 
-    // identificador legible para cada enregable: ENT- mas el numero de fila que ocupara
-    
-    const id = "ENT-" + hoja.getLastRow();
-
-    // escribir la fila, en el orden de los encabezados
-    hoja.appendRow([id, String(d.generation || ""), d.archivo, d.tipo || "", d.kb || 0,
-    new Date(), d.estado || "PENDIENTE_REVISION", d.motivo || "", "Equipo de revision", "", ""]);
-
-    // un archivo con error se avisa de inmediato
-    if (d.estado === "ERROR") {
-      GmailApp.sendEmail(CORREO, "Entregable con error: " + d.archivo,
-      "Motivo: " + d.motivo + "\nId: " + id);
-
+    if (segundosTranscurridos > VENTANA_SEGUNDOS) {
+      console.warn("Peticion expirada: " + d.archivo);
+      return texto("peticion expirada");
     }
 
-    return texto("ok " + id);
+    // sin nombre de archivo no hay nada que registrar
+    if (!d.archivo) {
+      return texto("falta el campo archivo");
+    }
+
+    // proteccion 3: un escritor a la vez
+    // si dos peticiones llegan juntas, las dos leerian la misma
+    // ultima fila y generarian el mismo ID
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);   // espera hasta 20 segundos su turno
+
+    // finally se ejecuta siempre, haya error o no,
+    // asi el candado nunca se queda puesto bloqueando peticiones
+    try {
+      const hoja = SpreadsheetApp.getActive().getSheetByName("REGISTRO");
+
+      // proteccion 4: duplicados
+      // google entrega los eventos al menos una vez: con un reintento
+      // el mismo archivo puede llegar dos veces. el generation es unico,
+      // asi que si ya esta en la columna B se descarta
+      const columnaB = hoja.getRange("B:B").getValues().join(",");
+      if (columnaB.indexOf(d.generation) !== -1) {
+        console.log("Duplicado descartado: " + d.archivo);
+        return texto("duplicado descartado");
+      }
+
+      // identificador legible: ENT- mas el numero de fila que ocupara
+      const id = "ENT-" + hoja.getLastRow();
+
+      // escribir la fila, en el orden de los encabezados
+      hoja.appendRow([id, String(d.generation), d.archivo, d.tipo || "", d.kb || 0,
+      new Date(), d.estado || "PENDIENTE_REVISION", d.motivo || "", "Equipo de revision", "", ""]);
+
+      // un archivo con error se avisa de inmediato
+      if (d.estado === "ERROR") {
+        GmailApp.sendEmail(CORREO, "Entregable con error: " + d.archivo,
+        "Motivo: " + d.motivo + "\nId: " + id);
+      }
+
+      return texto("ok " + id);
+
+    } finally {
+      lock.releaseLock();   // libera el turno
+    }
 
   } catch (err) {
     // si algo falla, queda registrado en los logs de apps script
     console.error("Error en doPost: " + err);
     return texto("error: " + err);
   }
-  /**
-   * Devuelve una respuesta de texto simple a quien llamo la web app
-   * contentservice construye un objeto de respuesta.
-   */
-  function texto(t) {
+}
+/**
+* Devuelve una respuesta de texto simple a quien llamo la web app
+* contentservice construye un objeto de respuesta.
+*/
+function texto(t) {
     return ContentService.createTextOutput(t);
   }
+
+/**
+ * DIA 3
+ * Calcula el sello de una cadena, usando el secreto compartido.
+ * 
+ * Ya que el secret noviaja por internet. lo que viaja es el resultado de mezclarlo con el mensaje.
+ * y quien recibe hace lo mismo: si coincide todo esta correcto
+ */
+function firmar(cadena) {
+  // computeHmacSha256Signature devuelve bytes
+  //base64encode los pasa a texto para poder compararlos y enviarlos.
+  return Utilities.base64Encode(Utilities.computeHmacSha256Signature(cadena, SECRET));
 }
+
+
 /**
  * resumen del dia,. la ejecua un acivador por horario.
  * poco despues de la hora limite de entrega
@@ -90,7 +161,7 @@ function resumenDiario(){
   // eenviamos un correo con los numeros del dia
   GmailApp.sendEmail(CORREO, "Resumen de entregables " + hoy,
   " Recibidos: " + recibidos + "\nPendientes de revision: " + pendientes +
-  "\Con error: " + errores);
+  "\nCon error: " + errores);
   
   //evento en el calendario para que se agregara al dia siguiente
 
@@ -130,7 +201,7 @@ const hoja = e.range.getSheet();
 hoja.getRange(fila, 11). setValue(new Date());
 
 //leer el id y el archivo par armar un correo 
-const id = hoja.getRange(fila,1).getValues();
+const id = hoja.getRange(fila,1).getValue();
 const archivo = hoja.getRange(fila, 3).getValue();
 
 // avisar el resultado o quien entrego el archivo
